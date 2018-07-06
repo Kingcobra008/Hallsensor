@@ -1,0 +1,182 @@
+
+#include <ESP8266WiFi.h>
+ 
+#include <Wire.h>
+#include <ACROBOTIC_SSD1306.h>
+ 
+WiFiClient client;
+const char* ssid     = "T-TECH";
+const char* password = "t-tech@2016";
+
+const char* host = "api.thingspeak.com";
+//const char* streamId   = "....................";
+const char* privateKey = "HYY5ABFRB9RR4V59";
+
+
+const byte led1 = 13;
+const byte led2 = 15;
+
+int hall_1 = 12;
+int hall_2 = 0;
+
+volatile int rpmcount = 0;//see http://arduino.cc/en/Reference/Volatile
+int rpm = 0;
+unsigned long lastmillis = 0;
+
+volatile int rpmcount2 = 0;//see http://arduino.cc/en/Reference/Volatile
+int rpm2 = 0;
+unsigned long lastmillis2 = 0;
+ 
+
+ void displayOled(int rpm,int hz, int rpm2,int hz2){
+    oled.clearDisplay(); 
+    oled.setTextXY(1,0);
+    oled.putString("Check : 1 ");
+    oled.setTextXY(2,0);  
+    oled.putString("RPM : ");
+    oled.setTextXY(2,10);  
+    oled.putString(String(rpm));
+    oled.setTextXY(3,0);  
+    oled.putString("Hz : ");
+    oled.setTextXY(3,10);  
+    oled.putString(String(hz));
+ 
+    oled.setTextXY(4,0);
+    oled.putString("Check : 2 ");
+    oled.setTextXY(5,0);  
+    oled.putString("RPM : ");
+    oled.setTextXY(5,10);  
+    oled.putString(String(rpm2));
+    oled.setTextXY(6,0);  
+    oled.putString("Hz : ");
+    oled.setTextXY(6,10);  
+    oled.putString(String(hz2));
+    
+ }  
+
+void statusLed(int rpm,int rpm2 ){
+
+  if(rpm > 1000){
+    digitalWrite(led1,HIGH);
+  } 
+  else{
+     digitalWrite(led1,LOW);
+  }
+  if(rpm2 > 1000){
+    digitalWrite(led2,HIGH);
+  } else{
+     digitalWrite(led2,LOW);
+  }  
+}
+ 
+void rpm_fan2(){ /* this code will be executed every time the interrupt 0 (pin2) gets low.*/ 
+      rpmcount2++;
+}
+
+void rpm_fan(){ /* this code will be executed every time the interrupt 0 (pin2) gets low.*/ 
+      rpmcount++;
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(10);
+
+     attachInterrupt(hall_1, rpm_fan, FALLING);//interrupt cero (0) is on pin two(2).
+     attachInterrupt(hall_2, rpm_fan2, FALLING);//interrupt cero (0) is on pin two(2).
+     Wire.begin();  
+     oled.init(); 
+     oled.clearDisplay(); 
+     pinMode(led1, OUTPUT);
+     pinMode(led2, OUTPUT); 
+     digitalWrite(led1,LOW);
+     digitalWrite(led2,LOW);
+     displayOled(0,0,0,0 );
+   
+
+  Serial.println();
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);  
+  /* Explicitly set the ESP8266 to be a WiFi-client, otherwise, it by default,
+     would try to act as both a client and an access-point and could cause
+     network-issues with your other WiFi-devices on your WiFi-network. */
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected");  
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void loop(){
+          rpmcount = 0; // Restart the RPM counter
+          rpmcount2 = 0; // Restart the RPM counter
+          interrupts();
+          delay(1000);
+          noInterrupts();
+          //if ( millis() - lastmillis == 1000 ){ /*Uptade every one second, this will be equal to reading frecuency (Hz).*/
+            rpm = rpmcount*60; /* Convert frecuency to RPM, note: this works for one interruption per full rotation. For two interrups per full rotation use rpmcount * 30.*/ 
+            rpm2 = rpmcount2*60;
+            displayOled(rpm,rpmcount,rpm2,rpmcount2 );
+            statusLed(rpm,rpm2);
+            web(rpm,rpmcount,rpm2,rpmcount2 );
+            rpmcount = 0; // Restart the RPM counter
+            rpmcount2 = 0; // Restart the RPM counter
+          //}         
+          }
+void web(int rpm,int hz, int rpm2,int hz2){
+  Serial.print("connecting to ");
+  Serial.println(host);
+  WiFiClient client;
+  const int httpPort = 80;
+  if (!client.connect(host, httpPort)) {
+    Serial.println("connection failed");
+    return;
+  }
+
+  String url = "/update/";
+  //url += streamId;
+  url += "?api_key=";
+  url += privateKey;
+   url += "&field1=";
+  url += rpm;
+    url += "&field2=";
+  url += hz;
+    url += "&field3=";
+  url += rpm2;
+    url += "&field4=";
+  url += hz2;
+  
+  Serial.print("Requesting URL: ");
+  Serial.println(url);
+  
+  // This will send the request to the server
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + host + "\r\n" + 
+               "Connection: close\r\n\r\n");
+  unsigned long timeout = millis();
+  while (client.available() == 0) {
+    if (millis() - timeout > 5000) {
+      Serial.println(">>> Client Timeout !");
+      client.stop();
+      return;
+    }
+  }
+  
+  // Read all the lines of the reply from server and print them to Serial
+  while(client.available()){
+    String line = client.readStringUntil('\r');
+    Serial.print(line);
+  }
+  
+  Serial.println();
+  Serial.println("closing connection");
+}
+
+
